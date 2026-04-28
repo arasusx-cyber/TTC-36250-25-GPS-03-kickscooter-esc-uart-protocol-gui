@@ -80,7 +80,7 @@ pip install pyserial
 ### Run
 
 ```bash
-python esc_uart_gui_scroll_no_ota_commands.py
+python esc_uart_gui_tkinter.py
 ```
 
 Basic usage:
@@ -309,7 +309,7 @@ Minimal repository layout:
 ```text
 .
 ├── README.md
-├── esc_uart_gui_scroll_no_ota_commands.py
+├── esc_uart_gui_tkinter.py
 └── program_screenshot.png
 ```
 
@@ -416,7 +416,7 @@ pip install pyserial
 ### Uruchomienie
 
 ```bash
-python esc_uart_gui_scroll_no_ota_commands.py
+python esc_uart_gui_tkinter.py
 ```
 
 Podstawowe użycie:
@@ -645,7 +645,7 @@ Minimalny układ repozytorium:
 ```text
 .
 ├── README.md
-├── esc_uart_gui_scroll_no_ota_commands.py
+├── esc_uart_gui_tkinter.py
 └── program_screenshot.png
 ```
 
