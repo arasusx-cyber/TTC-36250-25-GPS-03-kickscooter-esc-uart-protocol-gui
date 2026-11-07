@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+esc_uart_gui_log.txt
+esc_uart_gui_response_changes.txt
+esc_uart_scan_progress.json
+smart_scan_progress.json
+smart_family_logs/
+esc_uart_gui_window.json
