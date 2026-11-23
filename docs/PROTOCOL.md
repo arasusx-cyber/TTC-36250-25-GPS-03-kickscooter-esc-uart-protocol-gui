@@ -4,7 +4,7 @@
 
 The frames below are observations from the original project logs. They describe the tested protocol, rather than a universal scooter interface. The source remains the reference for the application's current behavior.
 
-TX CRC bytes are appended in big-endian order. The decoder can display `CRC ?` for longer RX frames; the interpretation of those RX checksums remains unresolved.
+TX CRC bytes are appended in big-endian order. The decoder uses the same FF-padding rule for received frames. Some longer RX framing/CRC variants may still require investigation.
 
 ## TX frame format
 
@@ -14,19 +14,19 @@ The tool uses this frame format:
 CMD_HI CMD_LO LEN VALUE... CRC32_MPEG2
 ```
 
-Even an empty read command should be sent with `LEN=01` and value `00`:
+Historically the GUI sent empty reads as `LEN=01 VALUE=00`, for example:
 
 ```text
 XX XX 01 00 + CRC
 ```
 
-3-byte payloads such as:
+That existing 4-byte command variant remains unchanged. The generator now also supports **experimental** zero-payload / 3-byte requests:
 
 ```text
 XX XX 00 + CRC
 ```
 
-are not used, because they did not work correctly in testing.
+The earlier 3-byte requests failed because the CRC calculation did not match the ESC firmware's FF-padding behavior. The corrected framing is verified offline, but acceptance by every target hardware/firmware revision is not confirmed.
 
 
 ## CRC32/MPEG-2
@@ -41,7 +41,18 @@ refout = false
 xorout = 0x00000000
 ```
 
-Example:
+**ESC CRC detail:** when the pre-CRC message length is not a multiple of four, the firmware pads it with `FF` bytes for the **CRC calculation only**. The padding bytes are **not transmitted** and do not change the `LEN` byte.
+
+Example of a 3-byte request:
+
+```text
+Message:             0E 00 00
+CRC input:           0E 00 00 FF
+CRC32/MPEG-2:        4F F6 61 19
+On-wire UART frame:  0E 00 00 4F F6 61 19
+```
+
+Existing 4-byte command example:
 
 ```text
 START payload: 00 02 01 01
