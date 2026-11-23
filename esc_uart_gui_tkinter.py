@@ -40,14 +40,21 @@ def crc32_mpeg2(data: bytes) -> int:
     return crc & 0xFFFFFFFF
 
 
-def build_frame(payload: bytes) -> bytes:
-    # Protokół TX: CMD_HI CMD_LO LEN [VALUE...] + CRC32/MPEG-2.
-    # Nie wysyłamy już 3-bajtowych ramek typu CMD CMD 00, bo w praktyce nie działają.
-    # Nawet pusty odczyt idzie jako LEN=01 oraz VALUE=00, np. BAT: 01 02 01 00.
-    if not (4 <= len(payload) <= 16):
-        raise ValueError("Payload musi mieć od 4 do 16 bajtów: CMD CMD LEN VALUE...")
-    return payload + crc32_mpeg2(payload).to_bytes(4, "big")
+def crc32_esc(data: bytes) -> int:
+    """ESC CRC32/MPEG-2 with internal FF padding to a multiple of 4 bytes.
 
+    Padding is used for CRC only: FF bytes are not sent over UART.
+    """
+    return crc32_mpeg2(data + b"\xFF" * ((-len(data)) % 4))
+
+
+def build_frame(payload: bytes) -> bytes:
+    # CMD_HI CMD_LO LEN [VALUE...] + CRC32/MPEG-2 (internal FF padding).
+    # LEN=00 / 3-byte requests are experimental. Existing four-byte
+    # commands, heartbeat presets and scan logic remain unchanged.
+    if not (3 <= len(payload) <= 16):
+        raise ValueError("Payload musi mieć 3–16 bajtów: CMD CMD LEN [VALUE...]")
+    return payload + crc32_esc(payload).to_bytes(4, "big")
 
 def hx(data: bytes) -> str:
     return " ".join(f"{b:02X}" for b in data)
@@ -134,7 +141,7 @@ def crc_ok_frame(frame: bytes) -> bool | None:
         return None
     payload = frame[:-4]
     got = int.from_bytes(frame[-4:], "big")
-    return crc32_mpeg2(payload) == got
+    return crc32_esc(payload) == got
 
 
 def decode_protocol_frame(frame: bytes) -> str:
@@ -161,7 +168,7 @@ def decode_protocol_frame(frame: bytes) -> str:
     if len(frame) >= expected_total:
         prefix = frame[:3 + ln]
         got_crc = frame[3 + ln:3 + ln + 4]
-        exp_crc = crc32_mpeg2(prefix).to_bytes(4, "big")
+        exp_crc = crc32_esc(prefix).to_bytes(4, "big")
         if got_crc == exp_crc:
             crc_status = "CRC OK"
         else:
@@ -467,7 +474,7 @@ UI_TEXTS = {
         "back": "Cofnij",
         "stop": "Stop",
         "usage_box": "Jak używać",
-        "usage_text": "1. Przycisk Bateria wysyła 01 02 01 00 + CRC.\n2. Przycisk Prędkość wysyła 00 04 01 01 + CRC, a RX 80 04 02 XX YY dekoduję jako XXYY/10 km/h.\n3. Pozostałe odczyty są ustawione jako CMD CMD 01 00 + CRC, zgodnie z zasadą LEN + 00.\n4. Manual przyjmuje 4–16 bajtów przed CRC. 3-bajtowe zapytania są wycięte.\n5. Komendy 0F 02 / 0F 03 są zablokowane, bo wyglądają na OTA/flash.\n6. Scan, smart scan i manual pomijają/zatrzymują tę rodzinę, żeby nie ruszać pamięci.",
+        "usage_text": "1. Przycisk Bateria wysyła 01 02 01 00 + CRC.\n2. Przycisk Prędkość wysyła 00 04 01 01 + CRC, a RX 80 04 02 XX YY dekoduję jako XXYY/10 km/h.\n3. Pozostałe odczyty są ustawione jako CMD CMD 01 00 + CRC, zgodnie z zasadą LEN + 00.\n4. Manual przyjmuje 3–16 bajtów przed CRC. Dla LEN=00 są 3 bajty; do CRC wewnętrznie dochodzi FF.\n5. Komendy 0F 02 / 0F 03 są zablokowane, bo wyglądają na OTA/flash.\n6. Scan, smart scan i manual pomijają/zatrzymują tę rodzinę, żeby nie ruszać pamięci.",
         "clear_log": "Wyczyść log w oknie",
         "save_log_as": "Zapisz log jako...",
         "connected": "POŁĄCZONO",
@@ -521,7 +528,7 @@ UI_TEXTS = {
         "back": "Back",
         "stop": "Stop",
         "usage_box": "How to use",
-        "usage_text": "1. The Battery button sends 01 02 01 00 + CRC.\n2. The Speed button sends 00 04 01 01 + CRC, and RX 80 04 02 XX YY is decoded as XXYY/10 km/h.\n3. Other read commands are set as CMD CMD 01 00 + CRC, following the LEN + 00 rule.\n4. Manual sending accepts 4–16 bytes before CRC. 3-byte queries are disabled.\n5. Commands 0F 02 / 0F 03 are blocked because they look like OTA/flash.\n6. Scan, smart scan and manual mode skip/block this family to avoid touching memory.",
+        "usage_text": "1. The Battery button sends 01 02 01 00 + CRC.\n2. The Speed button sends 00 04 01 01 + CRC, and RX 80 04 02 XX YY is decoded as XXYY/10 km/h.\n3. Other read commands are set as CMD CMD 01 00 + CRC, following the LEN + 00 rule.\n4. Manual sending accepts 3–16 bytes before CRC. LEN=00 requests use internal FF padding for CRC.\n5. Commands 0F 02 / 0F 03 are blocked because they look like OTA/flash.\n6. Scan, smart scan and manual mode skip/block this family to avoid touching memory.",
         "clear_log": "Clear window log",
         "save_log_as": "Save log as...",
         "connected": "CONNECTED",
@@ -557,6 +564,10 @@ ALL_KNOWN_BUTTONS = KNOWN_MAIN_BUTTONS + KNOWN_EXTRA_BUTTONS + KNOWN_WRITE_BUTTO
 
 def run_selftest():
     assert crc32_mpeg2(b"123456789") == 0x0376E6E7
+    assert build_frame(bytes.fromhex("0E 00 00")) == bytes.fromhex("0E 00 00 4F F6 61 19")
+    assert build_frame(bytes.fromhex("00 04 00")) == bytes.fromhex("00 04 00 71 91 2F D3")
+    assert build_frame(bytes.fromhex("00 02 01 01")) == bytes.fromhex("00 02 01 01 12 6D 58 1E")
+    assert crc_ok_frame(bytes.fromhex("0E 00 00 4F F6 61 19")) is True
     assert parse_hex("AA 55 01 01") == bytes([0xAA, 0x55, 0x01, 0x01])
     assert parse_hex("0xAA,0x55;0x01 0x01") == bytes([0xAA, 0x55, 0x01, 0x01])
     assert hx(bytes([0xAA, 0x55, 0x01, 0x01])) == "AA 55 01 01"
@@ -1146,7 +1157,7 @@ class App(tk.Tk):
             "1. Przycisk BAT wysyła 01 02 01 00 + CRC.\n"
             "2. Przycisk SPD wysyła 00 04 01 01 + CRC, a RX 80 04 02 XX YY dekoduję jako XXYY/10 km/h.\n"
             "3. Pozostałe odczyty są ustawione jako CMD CMD 01 00 + CRC, zgodnie z zasadą LEN + 00.\n"
-            "4. Manual przyjmuje 4–16 bajtów przed CRC. 3-bajtowe zapytania są wycięte.\n"
+            "4. Manual przyjmuje 3–16 bajtów przed CRC. Dla LEN=00 są 3 bajty; do CRC wewnętrznie dochodzi FF.\n"
             "5. Komendy 0F 02 / 0F 03 są zablokowane, bo wyglądają na OTA/flash.\n"
             "6. Scan, smart scan i manual pomijają/zatrzymują tę rodzinę, żeby nie ruszać pamięci."
         )
@@ -1333,7 +1344,7 @@ class App(tk.Tk):
             return
         try:
             raw = parse_hex(text)
-            if 4 <= len(raw) <= 16:
+            if 3 <= len(raw) <= 16:
                 reason = blocked_payload_reason(raw)
                 if reason:
                     messagebox.showerror("Zablokowano OTA/flash", f"Nie wysyłam {hx(raw)} — {reason}. To może ruszyć OTA/flash i uszkodzić pamięć.")
@@ -1342,7 +1353,7 @@ class App(tk.Tk):
                     return
                 self.worker.send_payload_auto_crc(raw, f"manual_auto_crc_{len(raw)}")
             else:
-                messagebox.showwarning("Zła długość", "Podaj 4–16 bajtów payloadu dla auto CRC; minimum to CMD CMD LEN VALUE")
+                messagebox.showwarning("Zła długość", "Podaj 3–16 bajtów przed CRC (CMD CMD LEN [VALUE...])")
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
 
@@ -1350,8 +1361,8 @@ class App(tk.Tk):
         text = self.manual_hex_var.get().strip()
         try:
             raw = parse_hex(text)
-            if not (4 <= len(raw) <= 16):
-                messagebox.showwarning("Zła długość", "Tu liczymy CRC dla payloadu 4–16 bajtów")
+            if not (3 <= len(raw) <= 16):
+                messagebox.showwarning("Zła długość", "Tu liczymy CRC dla 3–16 bajtów przed CRC")
                 return
             reason = blocked_payload_reason(raw)
             if reason:
